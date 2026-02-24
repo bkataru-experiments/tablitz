@@ -317,7 +317,15 @@ pub fn extract_from_leveldb(path: &Path, source: SessionSource) -> Result<TabSes
             // Look for OneTab's tabGroups structure
             if value_str.contains("tabGroups") {
                 eprintln!("    -> Found tabGroups in entry {}", entry_count);
-                if let Ok(root) = serde_json::from_str::<onetab_schema::OneTabRoot>(value_str) {
+                // OneTab stores the value as a JSON-encoded string (double-encoded):
+                // the raw bytes are `"{\\"tabGroups\\":[...]}"` — parse as String first,
+                // then parse the inner JSON as OneTabRoot.
+                let json_to_parse = if value_str.starts_with('"') {
+                    serde_json::from_str::<String>(value_str).unwrap_or_else(|_| value_str.to_string())
+                } else {
+                    value_str.to_string()
+                };
+                if let Ok(root) = serde_json::from_str::<onetab_schema::OneTabRoot>(&json_to_parse) {
                     for group in root.tab_groups {
                         // Parse URLs, skipping invalid ones
                         let tabs: Vec<Tab> = group
