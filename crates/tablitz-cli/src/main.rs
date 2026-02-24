@@ -294,7 +294,11 @@ async fn cmd_export(format: ExportFormat, out: Option<PathBuf>, filter: Option<S
 
     let content = match format {
         ExportFormat::Json => serde_json::to_string_pretty(&groups)?,
-        ExportFormat::Toml => toml::to_string(&groups)?,
+        ExportFormat::Toml => {
+            #[derive(serde::Serialize)]
+            struct TomlRoot<'a> { groups: &'a [tablitz_core::TabGroup] }
+            toml::to_string(&TomlRoot { groups: &groups })?
+        }
         ExportFormat::Markdown => {
             let mut md = String::new();
             for group in &groups {
@@ -512,7 +516,7 @@ async fn cmd_serve() -> Result<()> {
     use rmcp::{ServiceExt, transport::stdio};
     let store = tablitz_store::Store::open_default().await?;
     let server = mcp::TablitzMcpServer::new(store);
-    println!("tablitz MCP server starting on stdio...");
+    eprintln!("tablitz MCP server starting on stdio...");
     let service = server.serve(stdio()).await?;
     service.waiting().await?;
     Ok(())

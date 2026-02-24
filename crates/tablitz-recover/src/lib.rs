@@ -301,12 +301,22 @@ pub fn extract_from_leveldb(path: &Path, source: SessionSource) -> Result<TabSes
     let mut all_tabs_count = 0;
 
     iter.advance();
+    let mut entry_count = 0usize;
     while iter.valid() {
         iter.current(&mut key, &mut value);
+        entry_count += 1;
+
+        let key_display = std::str::from_utf8(&key)
+            .map(|s| s.to_string())
+            .unwrap_or_else(|_| format!("<binary {} bytes>", key.len()));
 
         if let Ok(value_str) = std::str::from_utf8(&value) {
+            let preview = &value_str[..value_str.len().min(120)];
+            eprintln!("  [{}] key={:?} value={:?}", entry_count, key_display, preview);
+
             // Look for OneTab's tabGroups structure
             if value_str.contains("tabGroups") {
+                eprintln!("    -> Found tabGroups in entry {}", entry_count);
                 if let Ok(root) = serde_json::from_str::<onetab_schema::OneTabRoot>(value_str) {
                     for group in root.tab_groups {
                         // Parse URLs, skipping invalid ones
@@ -351,11 +361,17 @@ pub fn extract_from_leveldb(path: &Path, source: SessionSource) -> Result<TabSes
                     }
                 }
             }
+        } else {
+            eprintln!("  [{}] key={:?} value=<binary {} bytes>",
+                entry_count,
+                std::str::from_utf8(&key).unwrap_or("<binary>"),
+                value.len());
         }
 
         iter.advance();
     }
 
+    eprintln!("Total entries scanned: {}", entry_count);
     eprintln!("Recovered {} tab groups, {} tabs total", found_groups.len(), all_tabs_count);
 
     Ok(TabSession {
@@ -566,17 +582,21 @@ fn parse_markdown_format(content: &str) -> Result<Vec<TabGroup>> {
             continue;
         }
 
-        // Group header: "## X tabs" or similar
-        if let Some(stripped) = line.strip_prefix("##") {
-            let title = stripped.trim().to_string();
-            current_header = Some((title, String::new()));
+        // Group header: "## X tabs" — this is the tab count header, not a user label
+        if line.starts_with("##") {
+            current_header = Some((String::new(), String::new()));
             continue;
         }
 
-        // Timestamp line: "> Created ..."
-        if line.starts_with(">") {
+        // "> Created ..." → timestamp; "> anything else" → user label
+        if line.starts_with('>') {
             if let Some(header) = &mut current_header {
-                header.1 = line.strip_prefix('>').unwrap_or("").trim().to_string();
+                let text = line.strip_prefix('>').unwrap_or("").trim().to_string();
+                if text.starts_with("Created") {
+                    header.1 = text;
+                } else {
+                    header.0 = text;
+                }
             }
             continue;
         }
