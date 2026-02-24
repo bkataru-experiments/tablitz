@@ -16,6 +16,7 @@ tablitz-core = { path = "../tablitz-core" }
 tablitz-recover = { path = "../tablitz-recover" }
 tablitz-store = { path = "../tablitz-store" }
 tablitz-search = { path = "../tablitz-search" }
+tablitz-sync = { path = "../tablitz-sync" }
 clap = { workspace = true }
 colored = { workspace = true }
 indicatif = { workspace = true }

@@ -82,6 +82,29 @@ enum Commands {
         #[arg(long, default_value = "0")]
         port: u16,
     },
+    /// Snapshot the store to a git-backed repo
+    Snapshot {
+        #[arg(long)]
+        repo: PathBuf,
+        #[arg(long)]
+        filename: Option<String>,
+    },
+    /// Restore the store from a git-backed snapshot
+    Restore {
+        #[arg(long)]
+        repo: PathBuf,
+        #[arg(long)]
+        commit: Option<String>,
+        #[arg(long)]
+        filename: Option<String>,
+    },
+    /// List recent snapshots in a git-backed repo
+    Snapshots {
+        #[arg(long)]
+        repo: PathBuf,
+        #[arg(long, default_value = "10")]
+        limit: usize,
+    },
 }
 
 #[derive(ValueEnum, Clone, Debug)]
@@ -158,6 +181,9 @@ async fn run(cli: Cli) -> Result<()> {
         Commands::Init => cmd_init().await,
         Commands::Stats => cmd_stats().await,
         Commands::Serve { port: _ } => cmd_serve().await,
+        Commands::Snapshot { repo, filename } => cmd_snapshot(repo, filename).await,
+        Commands::Restore { repo, commit, filename } => cmd_restore(repo, commit, filename).await,
+        Commands::Snapshots { repo, limit } => cmd_snapshots(repo, limit).await,
     }
 }
 
@@ -441,6 +467,47 @@ async fn cmd_stats() -> Result<()> {
     }
     Ok(())
 }
+
+async fn cmd_snapshot(repo: PathBuf, filename: Option<String>) -> Result<()> {
+    let store = tablitz_store::Store::open_default().await?;
+    let mut mgr = tablitz_sync::SyncManager::new(&repo);
+    if let Some(name) = filename {
+        mgr = tablitz_sync::SyncManager::with_filename(&repo, name);
+    }
+    let hash = mgr.snapshot(&store).await?;
+    println!("{} Snapshot committed: {}", "✓".green(), hash);
+    Ok(())
+}
+
+async fn cmd_restore(repo: PathBuf, commit: Option<String>, filename: Option<String>) -> Result<()> {
+    let store = tablitz_store::Store::open_default().await?;
+    let mut mgr = tablitz_sync::SyncManager::new(&repo);
+    if let Some(name) = filename {
+        mgr = tablitz_sync::SyncManager::with_filename(&repo, name);
+    }
+    let (groups, tabs) = if let Some(hash) = commit {
+        mgr.restore_from_commit(&store, &hash).await?
+    } else {
+        mgr.restore(&store).await?
+    };
+    println!("{} Restored: {} groups, {} tabs imported", "✓".green(), groups, tabs);
+    Ok(())
+}
+
+async fn cmd_snapshots(repo: PathBuf, limit: usize) -> Result<()> {
+    let mgr = tablitz_sync::SyncManager::new(&repo);
+    let snapshots = mgr.list_snapshots(limit)?;
+    if snapshots.is_empty() {
+        println!("No snapshots found.");
+        return Ok(());
+    }
+    for s in &snapshots {
+        println!("  {} {}", s.hash.dimmed(), s.message);
+    }
+    Ok(())
+}
+
+#[cfg(feature = "mcp")]
 
 #[cfg(feature = "mcp")]
 async fn cmd_serve() -> Result<()> {

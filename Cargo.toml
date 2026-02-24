@@ -5,6 +5,7 @@ members = [
     "crates/tablitz-store",
     "crates/tablitz-search",
     "crates/tablitz-cli",
+    "crates/tablitz-sync",
 ]
 resolver = "2"
 
