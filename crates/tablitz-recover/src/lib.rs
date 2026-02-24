@@ -300,7 +300,7 @@ pub fn extract_from_leveldb(path: &Path, source: SessionSource) -> Result<TabSes
     let mut seen_group_ids = std::collections::HashSet::new();
     let mut all_tabs_count = 0;
 
-    iter.advance();
+    iter.seek_to_first();
     let mut entry_count = 0usize;
     while iter.valid() {
         iter.current(&mut key, &mut value);
