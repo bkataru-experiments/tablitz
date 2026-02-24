@@ -160,6 +160,7 @@ impl TitleNormalizer {
     const SUFFIXES: &[&str] = &[
         " - Google Search",
         " | Twitter",
+        " on X",
         " - YouTube",
         " on YouTube",
         " - Wikipedia",
@@ -167,6 +168,13 @@ impl TitleNormalizer {
         " | LinkedIn",
         " - Stack Overflow",
         " | GitHub",
+        " | daily.dev",
+        " | DEV Community",
+        " | Hacker News",
+        " | Medium",
+        " – Frontend Masters Blog",
+        " | InfoWorld",
+        " | Product Hunt",
     ];
 
     /// Normalize a single title.
