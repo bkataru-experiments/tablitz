@@ -54,7 +54,7 @@ tokio-util = "0.7"
 axum = "0.8"
 
 # MCP
-rmcp = { version = "0.10", features = ["server", "transport-io", "macros"] }
+rmcp = { version = "0.10", features = ["server", "transport-io", "macros", "schemars"] }
 
 # Temp files
 tempfile = "3"

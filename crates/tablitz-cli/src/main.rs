@@ -77,6 +77,11 @@ enum Commands {
     Init,
     /// Show store statistics
     Stats,
+    /// Start MCP server (requires --features mcp)
+    Serve {
+        #[arg(long, default_value = "0")]
+        port: u16,
+    },
 }
 
 #[derive(ValueEnum, Clone, Debug)]
@@ -152,6 +157,7 @@ async fn run(cli: Cli) -> Result<()> {
         }
         Commands::Init => cmd_init().await,
         Commands::Stats => cmd_stats().await,
+        Commands::Serve { port: _ } => cmd_serve().await,
     }
 }
 
@@ -291,38 +297,38 @@ async fn cmd_export(format: ExportFormat, out: Option<PathBuf>, filter: Option<S
 }
 
 async fn cmd_search(query: String, mode: SearchMode, limit: usize) -> Result<()> {
-let store = tablitz_store::Store::open_default().await?;
-match mode {
-SearchMode::Fuzzy => {
-let session = store.get_session().await?;
-let results = tablitz_search::FuzzySearcher::search(&query, &session);
-let results: Vec<_> = results.into_iter().take(limit).collect();
-if results.is_empty() {
-println!("No results for '{}'", query);
-return Ok(());
-}
-println!("{} results for '{}':", results.len(), query.bold());
-for r in &results {
-println!("  [{:.2}] {} \n        {}", r.score, r.tab.title.cyan(), r.tab.url.as_str().dimmed());
-}
-}
-SearchMode::FullText => {
-let by_url = store.search_by_url(&query).await?;
-let by_title = store.search_by_title(&query).await?;
-let mut seen = std::collections::HashSet::new();
-let merged: Vec<_> = by_url.into_iter().chain(by_title)
-.filter(|t| seen.insert(t.url.to_string()))
-.take(limit).collect();
-if merged.is_empty() {
-println!("No results for '{}'", query);
-return Ok(());
-}
-println!("{} results for '{}':", merged.len(), query.bold());
-for tab in &merged {
-println!("  {} \n        {}", tab.title.cyan(), tab.url.as_str().dimmed());
-}
-}
-}
+    let store = tablitz_store::Store::open_default().await?;
+    match mode {
+        SearchMode::Fuzzy => {
+            let session = store.get_session().await?;
+            let results = tablitz_search::FuzzySearcher::search(&query, &session);
+            let results: Vec<_> = results.into_iter().take(limit).collect();
+            if results.is_empty() {
+                println!("No results for '{}'", query);
+                return Ok(());
+            }
+            println!("{} results for '{}':", results.len(), query.bold());
+            for r in &results {
+                println!("  [{:.2}] {} \n        {}", r.score, r.tab.title.cyan(), r.tab.url.as_str().dimmed());
+            }
+        }
+        SearchMode::FullText => {
+            let by_url = store.search_by_url(&query).await?;
+            let by_title = store.search_by_title(&query).await?;
+            let mut seen = std::collections::HashSet::new();
+            let merged: Vec<_> = by_url.into_iter().chain(by_title)
+                .filter(|t| seen.insert(t.url.to_string()))
+                .take(limit).collect();
+            if merged.is_empty() {
+                println!("No results for '{}'", query);
+                return Ok(());
+            }
+            println!("{} results for '{}':", merged.len(), query.bold());
+            for tab in &merged {
+                println!("  {} \n        {}", tab.title.cyan(), tab.url.as_str().dimmed());
+            }
+        }
+    }
     Ok(())
 }
 
@@ -435,3 +441,216 @@ async fn cmd_stats() -> Result<()> {
     }
     Ok(())
 }
+
+#[cfg(feature = "mcp")]
+async fn cmd_serve() -> Result<()> {
+    use rmcp::{ServiceExt, transport::stdio};
+    let store = tablitz_store::Store::open_default().await?;
+    let server = mcp::TablitzMcpServer::new(store);
+    println!("tablitz MCP server starting on stdio...");
+    let service = server.serve(stdio()).await?;
+    service.waiting().await?;
+    Ok(())
+}
+
+#[cfg(not(feature = "mcp"))]
+async fn cmd_serve() -> Result<()> {
+    eprintln!("MCP server requires the 'mcp' feature. Rebuild with: cargo build --features mcp");
+    std::process::exit(1);
+}
+
+#[cfg(feature = "mcp")]
+mod mcp {
+    use std::sync::Arc;
+    use rmcp::{
+        ErrorData as McpError,
+        ServerHandler,
+        model::{CallToolResult, Content},
+        handler::server::tool::ToolRouter,
+        handler::server::wrapper::Parameters,
+        tool, tool_handler, tool_router,
+    };
+    use rmcp::schemars::JsonSchema;
+    use serde::Deserialize;
+
+    #[derive(Clone)]
+    pub struct TablitzMcpServer {
+        store: Arc<tablitz_store::Store>,
+        tool_router: ToolRouter<Self>,
+    }
+
+    #[tool_router]
+    impl TablitzMcpServer {
+        pub fn new(store: tablitz_store::Store) -> Self {
+            Self {
+                store: Arc::new(store),
+                tool_router: Self::tool_router(),
+            }
+        }
+
+        #[tool(name = "search_tabs", description = "Search tabs by query using fuzzy matching")]
+        async fn search_tabs(
+            &self,
+            Parameters(params): Parameters<SearchTabsParams>,
+        ) -> Result<CallToolResult, McpError> {
+            let limit = params.limit.unwrap_or(20);
+            let session = self.store.get_session().await
+                .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+            let results = tablitz_search::FuzzySearcher::search(&params.query, &session);
+            let results: Vec<_> = results.into_iter().take(limit).collect();
+            let text = results.iter().map(|r| {
+                format!("[{:.2}] {}\n        {}", r.score, r.tab.title, r.tab.url)
+            }).collect::<Vec<_>>().join("\n");
+            let output = if text.is_empty() {
+                format!("No results for '{}'", params.query)
+            } else {
+                format!("{} results for '{}':\n{}", results.len(), params.query, text)
+            };
+            Ok(CallToolResult::success(vec![Content::text(output)]))
+        }
+
+        #[tool(name = "list_groups", description = "List tab groups with optional label filter")]
+        async fn list_groups(
+            &self,
+            Parameters(params): Parameters<ListGroupsParams>,
+        ) -> Result<CallToolResult, McpError> {
+            let limit = params.limit.unwrap_or(50);
+            let groups = self.store.get_all_groups().await
+                .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+            let groups: Vec<_> = groups.into_iter()
+                .filter(|g| params.filter.as_deref()
+                    .map(|f| g.label.as_deref().unwrap_or("").contains(f))
+                    .unwrap_or(true))
+                .take(limit)
+                .collect();
+            if groups.is_empty() {
+                return Ok(CallToolResult::success(vec![Content::text("No groups found.")]));
+            }
+            let text = groups.iter().map(|g| {
+                format!("[{}] {} ({} tabs) — {}",
+                    g.id.get(..8).unwrap_or(&g.id),
+                    g.label.as_deref().unwrap_or("(unlabeled)"),
+                    g.tabs.len(),
+                    g.created_at.format("%Y-%m-%d"))
+            }).collect::<Vec<_>>().join("\n");
+            Ok(CallToolResult::success(vec![Content::text(
+                format!("{} groups:\n{}", groups.len(), text)
+            )]))
+        }
+
+        #[tool(name = "get_stats", description = "Get store statistics: group count, tab count, top domains, date range")]
+        async fn get_stats(&self) -> Result<CallToolResult, McpError> {
+            let stats = self.store.get_stats().await
+                .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+            let mut out = format!("Groups: {}\nTabs: {}", stats.total_groups, stats.total_tabs);
+            if let Some(oldest) = stats.oldest_group {
+                out.push_str(&format!("\nOldest: {}", oldest.format("%Y-%m-%d")));
+            }
+            if let Some(newest) = stats.newest_group {
+                out.push_str(&format!("\nNewest: {}", newest.format("%Y-%m-%d")));
+            }
+            if !stats.top_domains.is_empty() {
+                out.push_str("\nTop domains:");
+                for (domain, count) in stats.top_domains.iter().take(10) {
+                    out.push_str(&format!("\n  {} ({})", domain, count));
+                }
+            }
+            Ok(CallToolResult::success(vec![Content::text(out)]))
+        }
+
+        #[tool(name = "recover_from_browser", description = "Recover tabs from a browser OneTab LevelDB store and import to tablitz")]
+        async fn recover_from_browser(
+            &self,
+            Parameters(params): Parameters<RecoverFromBrowserParams>,
+        ) -> Result<CallToolResult, McpError> {
+            let browser_enum = match params.browser.to_lowercase().as_str() {
+                "chrome" => tablitz_recover::Browser::Chrome,
+                "edge"   => tablitz_recover::Browser::Edge,
+                "brave"  => tablitz_recover::Browser::Brave,
+                "comet"  => tablitz_recover::Browser::Comet,
+                other    => return Err(McpError::invalid_params(
+                    format!("Unknown browser '{}'. Use: chrome, edge, brave, comet", other), None
+                )),
+            };
+            let opts = tablitz_recover::RecoverOptions {
+                browser: browser_enum,
+                profile: params.profile.unwrap_or_else(|| "Default".to_string()),
+                dry_run: false,
+                db_path: None,
+            };
+            let session = tablitz_recover::recover(opts)
+                .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+            let stats = self.store.insert_session(&session).await
+                .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+            Ok(CallToolResult::success(vec![Content::text(format!(
+                "Recovered from {}: {} groups, {} tabs inserted ({} groups, {} tabs skipped)",
+                params.browser,
+                stats.groups_inserted, stats.tabs_inserted,
+                stats.groups_skipped,  stats.tabs_skipped,
+            ))]))
+        }
+
+        #[tool(name = "import_onetab_export", description = "Import tabs from a OneTab export file (.txt pipe or .md markdown format)")]
+        async fn import_onetab_export(
+            &self,
+            Parameters(params): Parameters<ImportOnetabExportParams>,
+        ) -> Result<CallToolResult, McpError> {
+            let pb = std::path::PathBuf::from(&params.path);
+            let session = tablitz_recover::parse_onetab_export(&pb)
+                .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+            let stats = self.store.insert_session(&session).await
+                .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+            Ok(CallToolResult::success(vec![Content::text(format!(
+                "Imported from {}: {} groups, {} tabs ({} groups, {} tabs skipped)",
+                params.path,
+                stats.groups_inserted, stats.tabs_inserted,
+                stats.groups_skipped,  stats.tabs_skipped,
+            ))]))
+        }
+    }
+
+    // Tool parameter schemas
+    #[derive(Deserialize, JsonSchema)]
+    struct SearchTabsParams {
+        query: String,
+        limit: Option<usize>,
+    }
+
+    #[derive(Deserialize, JsonSchema)]
+    struct ListGroupsParams {
+        filter: Option<String>,
+        limit: Option<usize>,
+    }
+
+    #[derive(Deserialize, JsonSchema)]
+    struct RecoverFromBrowserParams {
+        browser: String,
+        profile: Option<String>,
+    }
+
+    #[derive(Deserialize, JsonSchema)]
+    struct ImportOnetabExportParams {
+        path: String,
+    }
+
+    #[tool_handler(router = self.tool_router)]
+    impl ServerHandler for TablitzMcpServer {
+        fn get_info(&self) -> rmcp::model::ServerInfo {
+            use rmcp::model::{Implementation, ServerCapabilities};
+            rmcp::model::ServerInfo {
+                protocol_version: Default::default(),
+                capabilities: ServerCapabilities {
+                    tools: Some(Default::default()),
+                    ..Default::default()
+                },
+                server_info: Implementation {
+                    name: "tablitz".to_string(),
+                    version: env!("CARGO_PKG_VERSION").to_string(),
+                    ..Default::default()
+                },
+                instructions: None,
+            }
+        }
+    }
+}
+
