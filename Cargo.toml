@@ -1,0 +1,60 @@
+[workspace]
+members = [
+    "crates/tablitz-core",
+    "crates/tablitz-recover",
+    "crates/tablitz-store",
+    "crates/tablitz-search",
+    "crates/tablitz-cli",
+]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+authors = ["Baalateja Kataru <baalateja.k@gmail.com>"]
+license = "MIT"
+repository = "https://github.com/bkataru-experiments/tablitz"
+
+[workspace.dependencies]
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+
+# Storage
+libsql = "0.6"
+rusty-leveldb = "1"
+
+# URL + text + time
+url = { version = "2", features = ["serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+unicode-normalization = "0.1"
+
+# Cross-platform paths
+dirs = "5"
+
+# Search
+tantivy = "0.22"
+nucleo = "0.5"
+usearch = "2"
+
+# CLI
+clap = { version = "4", features = ["derive"] }
+colored = "3"
+indicatif = "0.17"
+tabled = "0.16"
+
+# Error handling
+anyhow = "1"
+thiserror = "1"
+
+# Async (MCP)
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "io-std", "signal"] }
+tokio-util = "0.7"
+axum = "0.8"
+
+# MCP
+rmcp = { version = "0.10", features = ["server", "transport-io", "macros"] }
+
+# Temp files
+tempfile = "3"

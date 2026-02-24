@@ -1,0 +1,18 @@
+[package]
+name = "tablitz-recover"
+description = "OneTab LevelDB recovery and import pipeline for tablitz"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+tablitz-core = { path = "../tablitz-core" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+dirs = { workspace = true }
+chrono = { workspace = true }
+tempfile = { workspace = true }
+rusty-leveldb = { workspace = true }
+url = { workspace = true }

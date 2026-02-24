@@ -1,0 +1,15 @@
+# Rust
+/target/
+**/target/
+Cargo.lock
+
+# Editor
+*.swp
+*.swo
+*~
+
+# macOS
+.DS_Store
+
+# Debug
+*.pdb

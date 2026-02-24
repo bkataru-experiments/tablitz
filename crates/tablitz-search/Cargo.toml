@@ -1,0 +1,29 @@
+[package]
+name = "tablitz-search"
+description = "Search, deduplication, and AI features for tablitz"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+tablitz-core = { path = "../tablitz-core" }
+url = { workspace = true }
+chrono = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+unicode-normalization = { workspace = true }
+nucleo = { workspace = true }
+
+# Full-text search (optional)
+tantivy = { workspace = true, optional = true }
+
+# AI/embedding search (optional)
+fastembed = { version = "3", optional = true }
+usearch = { workspace = true, optional = true }
+
+[features]
+default = []
+full-text = ["dep:tantivy"]
+ai = ["dep:fastembed", "dep:usearch", "dep:tantivy", "full-text"]

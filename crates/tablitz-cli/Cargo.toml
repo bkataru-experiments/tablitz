@@ -1,0 +1,40 @@
+[package]
+name = "tablitz-cli"
+description = "CLI and MCP server for tablitz"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "tablitz"
+path = "src/main.rs"
+
+[dependencies]
+tablitz-core = { path = "../tablitz-core" }
+tablitz-recover = { path = "../tablitz-recover" }
+tablitz-store = { path = "../tablitz-store" }
+tablitz-search = { path = "../tablitz-search" }
+clap = { workspace = true }
+colored = { workspace = true }
+indicatif = { workspace = true }
+tabled = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+toml = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+chrono = { workspace = true }
+dirs = { workspace = true }
+tokio = { workspace = true }
+rmcp = { workspace = true, optional = true }
+axum = { workspace = true, optional = true }
+tokio-util = { workspace = true, optional = true }
+
+[features]
+default = []
+mcp = ["dep:rmcp"]
+mcp-http = ["mcp", "dep:axum", "dep:tokio-util"]
+ai = ["tablitz-search/ai"]
+full-text = ["tablitz-search/full-text"]
