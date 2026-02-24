@@ -86,7 +86,7 @@ impl FuzzySearcher {
                     results.push(SearchResult {
                         tab: tab.clone(),
                         group_id: group_id.clone(),
-                        score: score as f32 / u32::MAX as f32,
+                        score: score as f32,
                         match_kind: MatchKind::Fuzzy,
                     });
                     buf.clear();
@@ -113,7 +113,7 @@ impl FuzzySearcher {
                     results.push(SearchResult {
                         tab: tab.clone(),
                         group_id: group_id.clone(),
-                        score: score as f32 / u32::MAX as f32,
+                        score: score as f32,
                         match_kind: MatchKind::Fuzzy,
                     });
                     buf.clear();
@@ -135,7 +135,7 @@ impl FuzzySearcher {
         let max_score = Self::score_text(pattern, &tab.title, matcher, buf)
             .max(Self::score_text(pattern, tab.url.as_str(), matcher, buf));
 
-        max_score.map(|s| s as f32 / u32::MAX as f32)
+        max_score.map(|s| s as f32)
     }
 
     /// Score a single text string.

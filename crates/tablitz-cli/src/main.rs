@@ -335,7 +335,7 @@ async fn cmd_search(query: String, mode: SearchMode, limit: usize) -> Result<()>
             }
             println!("{} results for '{}':", results.len(), query.bold());
             for r in &results {
-                println!("  [{:.2}] {} \n        {}", r.score, r.tab.title.cyan(), r.tab.url.as_str().dimmed());
+                println!("  [{:.0}] {} \n        {}", r.score, r.tab.title.cyan(), r.tab.url.as_str().dimmed());
             }
         }
         SearchMode::FullText => {
@@ -508,8 +508,6 @@ async fn cmd_snapshots(repo: PathBuf, limit: usize) -> Result<()> {
 }
 
 #[cfg(feature = "mcp")]
-
-#[cfg(feature = "mcp")]
 async fn cmd_serve() -> Result<()> {
     use rmcp::{ServiceExt, transport::stdio};
     let store = tablitz_store::Store::open_default().await?;
@@ -566,7 +564,7 @@ mod mcp {
             let results = tablitz_search::FuzzySearcher::search(&params.query, &session);
             let results: Vec<_> = results.into_iter().take(limit).collect();
             let text = results.iter().map(|r| {
-                format!("[{:.2}] {}\n        {}", r.score, r.tab.title, r.tab.url)
+                format!("[{:.0}] {}\n        {}", r.score, r.tab.title, r.tab.url)
             }).collect::<Vec<_>>().join("\n");
             let output = if text.is_empty() {
                 format!("No results for '{}'", params.query)

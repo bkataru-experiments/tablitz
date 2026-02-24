@@ -52,11 +52,17 @@ impl SyncManager {
         let commit_output = self.git(&["commit", "-m", &commit_msg])
             .context("git commit failed")?;
 
+        // git commit output looks like:
+        //   "[main abc1234] message"       (subsequent commits)
+        //   "[main (root-commit) abc1234] message"  (first commit)
+        // Take the last token before ']'
         let hash = commit_output
             .lines()
             .next()
-            .and_then(|line| line.split_whitespace().nth(1))
-            .map(|s| s.trim_end_matches(']').to_string())
+            .and_then(|line| {
+                let bracket_content = line.trim_start_matches('[').split(']').next()?;
+                bracket_content.split_whitespace().last().map(str::to_string)
+            })
             .unwrap_or_else(|| "unknown".to_string());
 
         Ok(hash)
