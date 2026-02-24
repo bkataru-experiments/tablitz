@@ -227,7 +227,12 @@ async fn cmd_import(
     } else if let Some(path) = from_onetab_leveldb {
         let b = browser.unwrap_or(BrowserArg::Chrome);
         let p = profile.unwrap_or_else(|| "Default".to_string());
-        let source = tablitz_core::SessionSource::Chrome { profile: p };
+        let source = match &b {
+            BrowserArg::Chrome => tablitz_core::SessionSource::Chrome { profile: p.clone() },
+            BrowserArg::Edge => tablitz_core::SessionSource::Edge { profile: p.clone() },
+            BrowserArg::Brave => tablitz_core::SessionSource::Brave { profile: p.clone() },
+            BrowserArg::Comet => tablitz_core::SessionSource::Comet { profile: p.clone() },
+        };
         let session = tablitz_recover::extract_from_leveldb(&path, source)?;
         let stats = store.insert_session(&session).await?;
         println!(
@@ -262,6 +267,7 @@ async fn cmd_export(format: ExportFormat, out: Option<PathBuf>, filter: Option<S
             let mut md = String::new();
             for group in &groups {
                 md.push_str(&format!("---\n## {} tabs\n", group.tabs.len()));
+                md.push_str(&format!("> Created {}\n", group.created_at.format("%-m/%-d/%Y, %-I:%M:%S %p")));
                 if let Some(label) = &group.label {
                     md.push_str(&format!("> {}\n", label));
                 }
@@ -284,27 +290,39 @@ async fn cmd_export(format: ExportFormat, out: Option<PathBuf>, filter: Option<S
     Ok(())
 }
 
-async fn cmd_search(query: String, _mode: SearchMode, limit: usize) -> Result<()> {
-    let store = tablitz_store::Store::open_default().await?;
-    let session = store.get_session().await?;
-
-    let results = tablitz_search::FuzzySearcher::search(&query, &session);
-    let results: Vec<_> = results.into_iter().take(limit).collect();
-
-    if results.is_empty() {
-        println!("No results for '{}'", query);
-        return Ok(());
-    }
-
-    println!("{} results for '{}':", results.len(), query.bold());
-    for r in &results {
-        println!(
-            "  [{:.2}] {} \n        {}",
-            r.score,
-            r.tab.title.cyan(),
-            r.tab.url.as_str().dimmed()
-        );
-    }
+async fn cmd_search(query: String, mode: SearchMode, limit: usize) -> Result<()> {
+let store = tablitz_store::Store::open_default().await?;
+match mode {
+SearchMode::Fuzzy => {
+let session = store.get_session().await?;
+let results = tablitz_search::FuzzySearcher::search(&query, &session);
+let results: Vec<_> = results.into_iter().take(limit).collect();
+if results.is_empty() {
+println!("No results for '{}'", query);
+return Ok(());
+}
+println!("{} results for '{}':", results.len(), query.bold());
+for r in &results {
+println!("  [{:.2}] {} \n        {}", r.score, r.tab.title.cyan(), r.tab.url.as_str().dimmed());
+}
+}
+SearchMode::FullText => {
+let by_url = store.search_by_url(&query).await?;
+let by_title = store.search_by_title(&query).await?;
+let mut seen = std::collections::HashSet::new();
+let merged: Vec<_> = by_url.into_iter().chain(by_title)
+.filter(|t| seen.insert(t.url.to_string()))
+.take(limit).collect();
+if merged.is_empty() {
+println!("No results for '{}'", query);
+return Ok(());
+}
+println!("{} results for '{}':", merged.len(), query.bold());
+for tab in &merged {
+println!("  {} \n        {}", tab.title.cyan(), tab.url.as_str().dimmed());
+}
+}
+}
     Ok(())
 }
 
@@ -338,7 +356,7 @@ async fn cmd_list(filter: Option<String>, limit: usize) -> Result<()> {
         );
         println!(
             "  {} {} {} ({} tabs)",
-            group.id[..8].dimmed(),
+            group.id.get(..8).unwrap_or(&group.id).dimmed(),
             label.cyan(),
             flags,
             group.tabs.len()
@@ -374,8 +392,11 @@ async fn cmd_dedup(strategy: DedupStrategyArg, normalize_titles: bool, dry_run: 
         return Ok(());
     }
 
-    let stats = store.insert_session(&result.session).await?;
-    println!("{} Saved deduplicated session ({} groups inserted)", "✓".green(), stats.groups_inserted);
+    let group_count = result.session.groups.len();
+    for group in &result.session.groups {
+        store.replace_tabs_for_group(group).await?;
+    }
+    println!("{} Persisted deduplicated tabs ({} groups updated)", "✓".green(), group_count);
     Ok(())
 }
 

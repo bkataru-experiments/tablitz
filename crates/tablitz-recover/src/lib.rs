@@ -8,10 +8,10 @@
 //! - Provide a CLI-accessible API for tab recovery
 
 use anyhow::{Context, Result};
-use chrono::Utc;
 use serde::Deserialize;
 use std::fs;
 use std::path::{Path, PathBuf};
+use chrono::Utc;
 use tablitz_core::{ms_timestamp_to_datetime, SessionSource, Tab, TabGroup, TabSession};
 use tempfile::TempDir;
 use rusty_leveldb::LdbIterator;
@@ -129,7 +129,7 @@ pub fn resolve_leveldb_path(browser: &Browser, profile: &str) -> Result<PathBuf>
 }
 
 /// Returns the browser's vendor/browser directory name for the platform.
-fn browser_subdir(browser: &Browser, platform: &str, vendor_first: bool) -> PathBuf {
+fn browser_subdir(browser: &Browser, platform: &str, _vendor_first: bool) -> PathBuf {
     let (vendor, browser_name) = match browser {
         Browser::Chrome => ("Google", "Chrome"),
         Browser::Edge => ("Microsoft", "Edge"),
@@ -138,13 +138,16 @@ fn browser_subdir(browser: &Browser, platform: &str, vendor_first: bool) -> Path
     };
 
     if platform == "linux" {
-        // Linux uses lowercase vendor_browser format
-        let parts = if vendor_first {
-            format!("{}/{}", vendor.to_lowercase(), browser_name.to_lowercase())
-        } else {
-            vendor.to_lowercase()
+        // Linux paths are browser-specific and do not follow a simple vendor/browser formula.
+        // Chrome and Edge use a hyphenated lowercase format, while Brave and Comet keep their
+        // original casing because that is what the browsers use on the filesystem.
+        let path_str = match browser {
+            Browser::Chrome => "google-chrome".to_string(),
+            Browser::Edge => "microsoft-edge".to_string(),
+            Browser::Brave => "BraveSoftware/Brave-Browser".to_string(),
+            Browser::Comet => "perplexity-comet".to_string(),
         };
-        PathBuf::from(parts)
+        PathBuf::from(path_str)
     } else if platform == "windows" {
         // Windows uses backslash-separated format
         PathBuf::from(format!("{}\\{}", vendor, browser_name))
@@ -197,7 +200,7 @@ fn open_leveldb_safe(path: &Path) -> Result<(rusty_leveldb::DB, Option<TempDir>)
                 copy_dir_recursive(path, temp_path).context("Failed to copy LevelDB to temp dir")?;
 
                 // Try opening from the copy
-                let db = rusty_leveldb::DB::open(temp_path.join("leveldb"), opts)
+                let db = rusty_leveldb::DB::open(temp_path, opts)
                     .context("Failed to open copied LevelDB")?;
 
                 Ok((db, Some(temp_dir)))
@@ -211,16 +214,14 @@ fn open_leveldb_safe(path: &Path) -> Result<(rusty_leveldb::DB, Option<TempDir>)
 
 /// Recursively copies a directory from src to dst.
 fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<()> {
-    // Create the destination directory inside temp_dir
-    let leveldb_dst = dst.join("leveldb");
-    fs::create_dir_all(&leveldb_dst).context("Failed to create temp LevelDB directory")?;
+    fs::create_dir_all(dst).context("Failed to create destination directory")?;
 
     for entry in fs::read_dir(src).context("Failed to read source directory")? {
         let entry = entry.context("Failed to read directory entry")?;
         let file_type = entry.file_type().context("Failed to get file type")?;
 
         let src_path = entry.path();
-        let dst_path = leveldb_dst.join(entry.file_name());
+        let dst_path = dst.join(entry.file_name());
 
         if file_type.is_file() {
             fs::copy(&src_path, &dst_path).context("Failed to copy file")?;
@@ -296,6 +297,7 @@ pub fn extract_from_leveldb(path: &Path, source: SessionSource) -> Result<TabSes
     let mut key = Vec::new();
     let mut value = Vec::new();
     let mut found_groups = Vec::new();
+    let mut seen_group_ids = std::collections::HashSet::new();
     let mut all_tabs_count = 0;
 
     iter.advance();
@@ -341,9 +343,10 @@ pub fn extract_from_leveldb(path: &Path, source: SessionSource) -> Result<TabSes
                                 locked: group.locked.unwrap_or(false),
                                 starred: group.starred.unwrap_or(false),
                             };
-                            let tab_count = tab_group.tabs.len();
-                            found_groups.push(tab_group);
-                            all_tabs_count += tab_count;
+                            if seen_group_ids.insert(tab_group.id.clone()) {
+                                all_tabs_count += tab_group.tabs.len();
+                                found_groups.push(tab_group);
+                            }
                         }
                     }
                 }
@@ -451,13 +454,25 @@ fn detect_format(content: &str) -> ExportFormat {
     ExportFormat::Pipe
 }
 
+/// Compute a stable FNV-1a hash of a string (used for deterministic import IDs).
+fn fnv1a_hash(s: &str) -> u64 {
+    let mut hash: u64 = 14695981039346656037;
+    for byte in s.bytes() {
+        hash ^= byte as u64;
+        hash = hash.wrapping_mul(1099511628211);
+    }
+    hash
+}
+
+
 /// Parse OneTab's pipe-separated export format.
 ///
 /// Format: `url | title` with blank lines separating groups.
 fn parse_pipe_format(content: &str) -> Result<Vec<TabGroup>> {
+    let file_hash = fnv1a_hash(content);
     let mut groups = Vec::new();
     let mut current_tabs = Vec::new();
-    let mut group_index = 0;
+    let mut group_index = 0usize;
 
     for line in content.lines() {
         let line = line.trim();
@@ -466,7 +481,7 @@ fn parse_pipe_format(content: &str) -> Result<Vec<TabGroup>> {
         if line.is_empty() {
             if !current_tabs.is_empty() {
                 let group = TabGroup {
-                    id: format!("pipe-import-{}", group_index),
+                    id: format!("pipe-{:x}-g{}", file_hash, group_index),
                     label: None,
                     created_at: Utc::now(), // Timestamp not available in pipe format
                     tabs: current_tabs,
@@ -488,7 +503,7 @@ fn parse_pipe_format(content: &str) -> Result<Vec<TabGroup>> {
 
             if let Ok(parsed_url) = url::Url::parse(url_str) {
                 current_tabs.push(Tab {
-                    id: format!("tab-{}-{}", group_index, current_tabs.len()),
+                    id: format!("pipe-{:x}-g{}-t{}", file_hash, group_index, current_tabs.len()),
                     url: parsed_url,
                     title,
                     favicon_url: None,
@@ -503,7 +518,7 @@ fn parse_pipe_format(content: &str) -> Result<Vec<TabGroup>> {
     // Don't forget the last group
     if !current_tabs.is_empty() {
         let group = TabGroup {
-            id: format!("pipe-import-{}", group_index),
+            id: format!("pipe-{:x}-g{}", file_hash, group_index),
             label: None,
             created_at: Utc::now(),
             tabs: current_tabs,

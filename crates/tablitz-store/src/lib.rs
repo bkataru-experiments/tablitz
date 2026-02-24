@@ -76,21 +76,28 @@ impl Store {
         // tab_groups table
         self.conn
             .execute(
-                "CREATE TABLE IF NOT EXISTS tab_groups (
-                    id TEXT PRIMARY KEY,
-                    label TEXT,
-                    created_at INTEGER NOT NULL,
-                    pinned INTEGER NOT NULL DEFAULT 0,
-                    locked INTEGER NOT NULL DEFAULT 0,
-                    starred INTEGER NOT NULL DEFAULT 0,
-                    source_type TEXT NOT NULL,
-                    source_profile TEXT,
-                    source_path TEXT
-                )",
-                (),
-            )
-            .await
-            .context("failed to create tab_groups table")?;
+            "CREATE TABLE IF NOT EXISTS tab_groups (
+                id TEXT PRIMARY KEY,
+                label TEXT,
+                created_at INTEGER NOT NULL,
+                imported_at INTEGER NOT NULL DEFAULT 0,
+                pinned INTEGER NOT NULL DEFAULT 0,
+                locked INTEGER NOT NULL DEFAULT 0,
+                starred INTEGER NOT NULL DEFAULT 0,
+                source_type TEXT NOT NULL,
+                source_profile TEXT,
+                source_path TEXT
+            )",
+            (),
+        )
+        .await
+        .context("failed to create tab_groups table")?;
+
+        // Migration: add imported_at if missing (safe to run every time, fails silently if column exists)
+        let _ = self.conn.execute(
+            "ALTER TABLE tab_groups ADD COLUMN imported_at INTEGER NOT NULL DEFAULT 0",
+            ()
+        ).await;
 
         // tabs table
         self.conn
@@ -157,8 +164,8 @@ impl Store {
             let group_inserted = match tx
                 .execute(
                     "INSERT OR IGNORE INTO tab_groups 
-                        (id, label, created_at, pinned, locked, starred, source_type, source_profile, source_path)
-                        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                        (id, label, created_at, pinned, locked, starred, source_type, source_profile, source_path, imported_at)
+                        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
                     libsql::params![
                         group.id.clone(),
                         group.label.clone(),
@@ -169,6 +176,7 @@ impl Store {
                         source_type.clone(),
                         source_profile.as_deref(),
                         source_path.as_deref(),
+                        session.imported_at.timestamp_millis(),
                     ],
                 )
                 .await
@@ -264,6 +272,44 @@ impl Store {
         Ok(())
     }
 
+    /// Replaces all tabs in a group: deletes existing then re-inserts.
+    /// Used by the dedup command to persist deduplicated tab lists.
+    pub async fn replace_tabs_for_group(&self, group: &TabGroup) -> anyhow::Result<()> {
+        let tx = self
+            .conn
+            .transaction()
+            .await
+            .context("failed to start transaction")?;
+        tx.execute(
+            "DELETE FROM tabs WHERE group_id = ?1",
+            libsql::params![group.id.clone()],
+        )
+        .await
+        .context("failed to delete existing tabs for group")?;
+        for (position, tab) in group.tabs.iter().enumerate() {
+            tx.execute(
+                "INSERT INTO tabs
+                    (id, group_id, url, title, favicon_url, added_at, position)
+                    VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                libsql::params![
+                    tab.id.clone(),
+                    group.id.clone(),
+                    tab.url.as_str(),
+                    tab.title.clone(),
+                    tab.favicon_url.as_deref(),
+                    tab.added_at.timestamp_millis(),
+                    position as i64,
+                ],
+            )
+            .await
+            .context("failed to insert tab in replace_tabs_for_group")?;
+        }
+        tx.commit()
+            .await
+            .context("failed to commit replace_tabs_for_group")?;
+        Ok(())
+    }
+
     /// Deletes a tab group and all its tabs.
     pub async fn delete_group(&self, group_id: &str) -> anyhow::Result<()> {
         self.conn
@@ -337,12 +383,16 @@ impl Store {
     /// Returns a complete session (all groups and tabs).
     pub async fn get_session(&self) -> anyhow::Result<TabSession> {
         let groups = self.get_all_groups().await?;
-
+        let created_at = groups
+            .iter()
+            .map(|g| g.created_at)
+            .min()
+            .unwrap_or_else(Utc::now);
         Ok(TabSession {
             version: 1,
             source: SessionSource::Unknown,
             groups,
-            created_at: Utc::now(),
+            created_at,
             imported_at: Utc::now(),
         })
     }
