@@ -16,3 +16,6 @@ chrono = { workspace = true }
 tempfile = { workspace = true }
 rusty-leveldb = { workspace = true }
 url = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"
