@@ -308,3 +308,45 @@ fn test_live_markdown_export_if_available() {
         }
     }
 }
+
+// ─── LevelDB double-encoding regression ────────────────────────────────────
+
+/// Regression test: OneTab stores LevelDB values as double-encoded JSON strings.
+/// The raw bytes are `"{\"tabGroups\":[...]}"` (outer JSON string wrapping inner JSON).
+/// Previously, serde_json::from_str::<OneTabRoot> would silently fail on this format.
+#[test]
+fn test_extract_from_leveldb_double_encoded_value() {
+    use tablitz_recover::extract_from_leveldb;
+    use tablitz_core::SessionSource;
+
+    let dir = tempfile::tempdir().unwrap();
+    let db_path = dir.path();
+
+    // Build a realistic OneTab inner JSON object
+    let inner_json = r#"{"tabGroups":[{"id":"grp-test-001","createDate":1760074389851,"tabsMeta":[{"id":"tab-test-001","url":"https://example.com/rust","title":"The Rust Programming Language"},{"id":"tab-test-002","url":"https://docs.rs/serde","title":"serde - Rust"}]}]}"#;
+
+    // Double-encode: serialize the JSON string as a JSON value (adds outer quotes + escaping)
+    let outer_value = serde_json::to_string(inner_json).expect("double-encode");
+
+    // Write to a real LevelDB
+    let opts = rusty_leveldb::Options::default();
+    let mut db = rusty_leveldb::DB::open(db_path, opts).expect("open db");
+    db.put(b"state", outer_value.as_bytes()).expect("put");
+    db.flush().expect("flush");
+    drop(db);
+
+    // Now recover — should find 1 group with 2 tabs
+    let session = extract_from_leveldb(db_path, SessionSource::Unknown)
+        .expect("extract_from_leveldb");
+
+    assert_eq!(session.groups.len(), 1, "should find 1 group");
+    assert_eq!(session.groups[0].tabs.len(), 2, "should find 2 tabs");
+    assert_eq!(
+        session.groups[0].tabs[0].title.as_str(),
+        "The Rust Programming Language"
+    );
+    assert_eq!(
+        session.groups[0].tabs[1].url.as_str(),
+        "https://docs.rs/serde"
+    );
+}

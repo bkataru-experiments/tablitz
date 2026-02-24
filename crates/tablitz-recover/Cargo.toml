@@ -19,3 +19,5 @@ url = { workspace = true }
 
 [dev-dependencies]
 tempfile = "3"
+rusty-leveldb = { workspace = true }
+serde_json = { workspace = true }

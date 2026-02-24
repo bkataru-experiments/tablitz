@@ -13,6 +13,7 @@ tablitz/
     ├── tablitz-recover/ # LevelDB extraction + export file parsing
     ├── tablitz-store/   # libSQL-backed canonical store
     ├── tablitz-search/  # Fuzzy, full-text, and semantic search + dedup
+    ├── tablitz-sync/    # Git-backed snapshot and restore
     └── tablitz-cli/     # CLI commands + MCP server (optional feature)
 ```
 
@@ -52,6 +53,8 @@ Handles reading OneTab data from raw sources:
 }
 ```
 
+> **Note:** The value stored in LevelDB is double-encoded: OneTab serializes the JSON object to a string, then stores that string as a JSON value. The raw bytes start with `"{\` (outer quote, brace, backslash). tablitz unwraps the outer string before parsing.
+
 ### `tablitz-store`
 SQLite-backed (via `libsql`) canonical store persisted at `~/.local/share/tablitz/tablitz.db` (Linux) or platform equivalent:
 - Schema: `tab_groups` table (id, label, created_at, pinned, locked, starred, source_type, source_profile, source_path, imported_at) + `tabs` table (id, group_id, url, title, favicon_url, added_at, position)
@@ -83,6 +86,9 @@ The user-facing binary (`tablitz`):
 | `init` | Create config/data directories |
 | `stats` | Show store statistics |
 | `serve` | Start MCP server (feature: `mcp`) |
+| `snapshot` | Create git-backed snapshot of the store |
+| `restore` | Restore store from a git-backed snapshot |
+| `snapshots` | List recent snapshots in a repo |
 
 **Optional features:**
 - `mcp` — enables the `serve` command and `rmcp`-based MCP server

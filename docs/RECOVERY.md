@@ -170,6 +170,16 @@ Or specify the exact path:
 tablitz recover --db-path ~/.config/google-chrome/Profile\ 2/Local\ Extension\ Settings/chphlpgkkbolifaimnlloiipkdnihall/
 ```
 
+### Edge: no `.ldb` files found
+
+Edge may not have compacted its LevelDB yet, so all data is in the write-ahead log (`.log` file) rather than `.ldb` SSTables. tablitz's `recover --browser edge` reads both; if it finds 0 groups, ensure the Edge extension directory is the correct one:
+
+```
+%LOCALAPPDATA%\Microsoft\Edge\User Data\{Profile}\Local Extension Settings\hoimpamkkoehapgenciaoajfkfkpgfop\
+```
+
+Note the extension ID `hoimpamkkoehapgenciaoajfkfkpgfop` is specific to Edge (Chrome uses `chphlpgkkbolifaimnlloiipkdnihall`).
+
 ### Auto-detected path is wrong
 
 Use `--db-path` to specify the exact LevelDB directory manually.

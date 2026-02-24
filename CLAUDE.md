@@ -44,7 +44,7 @@ tablitz-recover   tablitz-store   tablitz-search   tablitz-sync
 **tablitz-core** — Shared domain types only: `Tab`, `TabGroup`, `TabSession`, `SessionSource`. All `serde` timestamps use `ts_milliseconds` (OneTab's native format). IDs are `String` throughout. `TabSession::merge()` is the only cross-session operation here.
 
 **tablitz-recover** — Two entry points:
-- `recover(RecoverOptions)` — opens a live browser's LevelDB via `rusty_leveldb`, iterates all KV pairs, finds keys containing `tabGroups`, parses the OneTab JSON schema (see `tabGroups[].tabsMeta[].{url,title}`)
+- `recover(RecoverOptions)` — opens a live browser's LevelDB via `rusty_leveldb`, iterates all KV pairs, finds keys containing `tabGroups`. **The value is double-encoded**: OneTab stores it as a JSON string wrapping the JSON object (raw bytes start with `"{\`), so the code first calls `serde_json::from_str::<String>` to unwrap the outer string, then parses the inner JSON as `OneTabRoot`.
 - `parse_onetab_export(path)` — dispatches to pipe-format (`URL | Title`) or markdown parser (`---\n## N tabs\n> timestamp`) based on file content; IDs are derived from FNV-1a hash of file content + position for stability
 
 **tablitz-store** — Async `Store` wrapping a `libsql::Connection`. Default DB path: `~/.local/share/tablitz/tablitz.db`. Key behaviors:

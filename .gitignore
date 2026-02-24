@@ -13,3 +13,10 @@ Cargo.lock
 
 # Debug
 *.pdb
+
+# Session / context scratch files in docs/
+docs/*.txt
+docs/*.xml
+docs/claude-*.txt
+docs/coding-agent-session.txt
+docs/x-context-*.txt

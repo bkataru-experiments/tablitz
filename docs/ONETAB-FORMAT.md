@@ -9,10 +9,10 @@ OneTab stores its data in Chrome's extension LevelDB store at:
 | Platform | Path |
 |---|---|
 | Windows (Chrome) | `%LOCALAPPDATA%\Google\Chrome\User Data\{Profile}\Local Extension Settings\chphlpgkkbolifaimnlloiipkdnihall\` |
-| Windows (Edge) | `%LOCALAPPDATA%\Microsoft\Edge\User Data\{Profile}\Local Extension Settings\chphlpgkkbolifaimnlloiipkdnihall\` |
+| Windows (Edge) | `%LOCALAPPDATA%\Microsoft\Edge\User Data\{Profile}\Local Extension Settings\hoimpamkkoehapgenciaoajfkfkpgfop\` |
 | Windows (Brave) | `%LOCALAPPDATA%\BraveSoftware\Brave-Browser\User Data\{Profile}\Local Extension Settings\chphlpgkkbolifaimnlloiipkdnihall\` |
 | Linux (Chrome) | `~/.config/google-chrome/{Profile}/Local Extension Settings/chphlpgkkbolifaimnlloiipkdnihall/` |
-| Linux (Edge) | `~/.config/microsoft-edge/{Profile}/Local Extension Settings/chphlpgkkbolifaimnlloiipkdnihall/` |
+| Linux (Edge) | `~/.config/microsoft-edge/{Profile}/Local Extension Settings/hoimpamkkoehapgenciaoajfkfkpgfop/` |
 | Linux (Brave) | `~/.config/BraveSoftware/Brave-Browser/{Profile}/Local Extension Settings/chphlpgkkbolifaimnlloiipkdnihall/` |
 | macOS (Chrome) | `~/Library/Application Support/Google/Chrome/{Profile}/Local Extension Settings/chphlpgkkbolifaimnlloiipkdnihall/` |
 
@@ -44,6 +44,8 @@ The value stored under the main key in LevelDB is a JSON object:
 }
 ```
 
+> **Important:** The LevelDB value is **double-encoded** — OneTab stores the JSON as a JSON string (i.e., the raw bytes are an outer JSON string whose content is the serialized JSON object). When reading raw bytes the value starts with `"{\` rather than `{`. tablitz handles this transparently by first parsing the outer string, then parsing the inner JSON.
+
 Key fields:
 - `createDate` — Unix timestamp in **milliseconds** (not seconds)
 - `title` — optional; may be `null` or absent
@@ -55,7 +57,7 @@ Key fields:
 - The LevelDB directory should be **copied before reading** to avoid lock contention with a running browser
 - tablitz uses `rusty_leveldb` (pure Rust, no C deps) with the copy placed in a temp directory
 - Multiple keys may contain `tabGroups` data if OneTab has written multiple snapshots; tablitz deduplicates by group ID
-- The `.log` file is the active write-ahead log (typically small); `.ldb` files are the compacted SSTables containing the bulk of the data
+- The `.log` file is the active write-ahead log; `.ldb` files are compacted SSTables. If the browser has not flushed/compacted recently (common with Edge), **all data may be in the `.log` file** with no `.ldb` files present — tablitz's `recover` command handles both cases
 
 ---
 
